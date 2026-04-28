@@ -307,6 +307,22 @@ body{font-family:'DM Sans',sans-serif;background:var(--fairway);color:var(--ink)
   </div>
 </div>
 
+<!-- Recovery Modal -->
+<div class="modal-overlay" id="recoveryModal">
+  <div class="modal">
+    <div class="modal-title">Resume Round?</div>
+    <div class="modal-sub">You have an unfinished round that was interrupted.</div>
+    <div style="background:var(--fairway);border-radius:12px;padding:14px 16px;margin-bottom:18px;">
+      <div style="font-size:15px;font-weight:500;color:var(--green);margin-bottom:3px;" id="recoveryCourseName"></div>
+      <div style="font-size:13px;color:var(--muted);" id="recoveryScoreCount"></div>
+    </div>
+    <div class="modal-btn-row">
+      <button class="btn-secondary" onclick="discardRound()">Discard</button>
+      <button class="btn-primary" onclick="resumeRound()">Resume Round</button>
+    </div>
+  </div>
+</div>
+
 <!-- Finish Modal -->
 <div class="modal-overlay" id="finishModal">
   <div class="modal">
@@ -436,6 +452,7 @@ function showApp() {
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('appShell').style.display = 'flex';
   switchTab('Players');
+  setTimeout(checkForRecovery, 500);
 }
 
 // ── Tab switching ─────────────────────────────────────────────────────────────
@@ -697,6 +714,39 @@ function togglePlayer(id) {
   if (idx===-1) setupState.selectedPlayerIds.push(id); else setupState.selectedPlayerIds.splice(idx,1);
   renderPlaySetup();
 }
+// ── Round Recovery ────────────────────────────────────────────────────────────
+function saveRoundBackup() {
+  if (!roundState) return;
+  try { localStorage.setItem('gc_active_round', JSON.stringify(roundState)); } catch(e) {}
+}
+function clearRoundBackup() {
+  try { localStorage.removeItem('gc_active_round'); } catch(e) {}
+}
+function loadRoundBackup() {
+  try { var v = localStorage.getItem('gc_active_round'); return v ? JSON.parse(v) : null; } catch(e) { return null; }
+}
+function checkForRecovery() {
+  var backup = loadRoundBackup();
+  if (!backup) return;
+  var scoreCount = 0;
+  backup.players.forEach(function(p){ backup.scores[p.id].forEach(function(s){ if(s!==null) scoreCount++; }); });
+  if (scoreCount === 0) { clearRoundBackup(); return; }
+  document.getElementById('recoveryCourseName').textContent = backup.courseName;
+  document.getElementById('recoveryScoreCount').textContent = scoreCount + ' score' + (scoreCount!==1?'s':'') + ' entered';
+  document.getElementById('recoveryModal').classList.add('open');
+}
+function resumeRound() {
+  var backup = loadRoundBackup();
+  if (!backup) return;
+  roundState = backup;
+  document.getElementById('recoveryModal').classList.remove('open');
+  switchTab('Play');
+}
+function discardRound() {
+  clearRoundBackup();
+  document.getElementById('recoveryModal').classList.remove('open');
+}
+
 function startRound() {
   if (!setupState.selectedPlayerIds.length) return;
   var roundPlayers = setupState.selectedPlayerIds.map(function(id){ return cachedPlayers.find(function(p){return p.id===id;}); }).filter(Boolean);
@@ -710,6 +760,8 @@ function startRound() {
     totalPar: setupState.pars.reduce(function(a,b){return a+b;},0),
     players: roundPlayers, scores: scoreMap
   };
+  clearRoundBackup();
+  saveRoundBackup();
   renderActiveRound();
 }
 
@@ -755,6 +807,7 @@ function renderActiveRound() {
 function changeRoundPar(h,d) {
   roundState.pars[h]=Math.max(3,Math.min(6,roundState.pars[h]+d));
   roundState.totalPar=roundState.pars.reduce(function(a,b){return a+b;},0);
+  saveRoundBackup();
   renderActiveRound();
 }
 
@@ -778,8 +831,8 @@ function openScoreModal(hole,playerId) {
   document.getElementById('scoreModal').classList.add('open');
 }
 function closeScoreModal(){ document.getElementById('scoreModal').classList.remove('open'); }
-function clearScoreModal(){ roundState.scores[scoreModalState.playerId][scoreModalState.hole]=null; closeScoreModal(); renderActiveRound(); }
-function saveScoreModal(){ if(scoreModalState.selected!==null) roundState.scores[scoreModalState.playerId][scoreModalState.hole]=scoreModalState.selected; closeScoreModal(); renderActiveRound(); }
+function clearScoreModal(){ roundState.scores[scoreModalState.playerId][scoreModalState.hole]=null; saveRoundBackup(); closeScoreModal(); renderActiveRound(); }
+function saveScoreModal(){ if(scoreModalState.selected!==null) roundState.scores[scoreModalState.playerId][scoreModalState.hole]=scoreModalState.selected; saveRoundBackup(); closeScoreModal(); renderActiveRound(); }
 
 // ── Finish ────────────────────────────────────────────────────────────────────
 function openFinishModal() {
@@ -813,6 +866,7 @@ async function confirmFinish() {
     });
     await dbInsert('round_scores', scoreRows);
   }
+  clearRoundBackup();
   roundState=null; setupState.selectedPlayerIds=[];
   btn.disabled=false; btn.textContent='Save Round';
   closeFinishModal();
@@ -848,7 +902,7 @@ document.addEventListener('click',function(e){
   var cs=document.getElementById('courseSearch');
   if(dd&&cs&&!cs.contains(e.target)&&!dd.contains(e.target)) dd.style.display='none';
 });
-['scoreModal','playerModal','finishModal'].forEach(function(id){
+['scoreModal','playerModal','finishModal','recoveryModal'].forEach(function(id){
   document.getElementById(id).addEventListener('click',function(e){ if(e.target===this) this.classList.remove('open'); });
 });
 
